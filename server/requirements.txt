@@ -1,0 +1,18 @@
+# MouthMap Production Server Requirements
+# =========================================
+# Install with: pip install -r server/requirements.txt
+
+# Web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# ML inference
+onnxruntime>=1.16.0  # CPU inference engine
+numpy>=1.24.0
+
+# Video processing
+opencv-python-headless>=4.8.0  # Lighter than full opencv
+
+# API utilities
+python-multipart>=0.0.6  # For file uploads
+pydantic>=2.5.0

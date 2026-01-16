@@ -1,0 +1,198 @@
+﻿MouthMap Project: Advanced Architectural Blueprint for Production-Grade Edge Deployment of Spatiotemporal Lip Reading Systems
+1. Introduction: The Transition from Research Prototype to Production Artifact
+The domain of Visual Speech Recognition (VSR), commonly known as lip reading, sits at the intersection of computer vision and sequence modeling, presenting one of the most computationally demanding challenges in modern deep learning. The "MouthMap" project, currently an end-to-end system leveraging 3D Convolutional Neural Networks (3D-CNNs), Bidirectional Long Short-Term Memory (Bi-LSTM) networks, and Connectionist Temporal Classification (CTC) loss, has achieved a commendable accuracy of approximately 88% on the GRID corpus with a model size of 32MB. While these metrics signal a successful research phase, the transition to a production-grade portfolio project—specifically one targeting edge deployment on mobile and embedded devices—requires a fundamental re-engineering of the system's architecture, inference pipeline, and operational lifecycle.
+Research models typically prioritize accuracy and representational capacity, often operating in environments with unbounded memory and powerful desktop GPUs. In contrast, production environments, particularly on the edge, are defined by strict constraints on latency, throughput, energy consumption, and thermal envelopes. The current MouthMap architecture, while accurate, relies on heavy 3D convolution operations and sequential recurrent processing that are notoriously difficult to accelerate on standard mobile Neural Processing Units (NPUs) and Digital Signal Processors (DSPs). This report provides a comprehensive, exhaustive analysis of the modernization strategies required to bridge this gap. It details the theoretical and practical steps necessary to distill the heavy research model into a lightweight, high-performance inference engine without compromising its predictive power.
+The analysis proceeds by first deconstructing the existing architecture to identify specific computational bottlenecks. It then proposes a series of advanced modernization strategies, ranging from the adoption of efficient 2D backbones like ShuffleNetV2 and MobileViT to the implementation of parallelizable temporal backends like Temporal Convolutional Networks (TCNs). Following the architectural overhaul, the report delves into the intricacies of the inference landscape, rigorously comparing TensorFlow Lite and ONNX Runtime in the context of spatiotemporal operator support. Finally, it constructs a robust Machine Learning Operations (MLOps) blueprint, integrating NVIDIA Triton Inference Server, gRPC bidirectional streaming, and Data Version Control (DVC) to ensure the system is scalable, reproducible, and ready for the rigorous demands of a professional engineering portfolio.
+2. Architectural Analysis: Deconstructing the Spatiotemporal Bottleneck
+The incumbent architecture of MouthMap follows a classic VSR design pattern: a spatiotemporal front-end (3D-CNN) to extract short-term visual dynamics, followed by a sequence modeling back-end (Bi-LSTM) to capture long-term linguistic context, culminating in a CTC decoding layer. While effective for maximizing accuracy on benchmarks like GRID, this topology introduces distinct inefficiencies that hinder real-time performance on edge devices.
+2.1 The Computational Cost of 3D Convolutions
+3D Convolutional Neural Networks (3D-CNNs) are mathematically elegant for video analysis because they simultaneously model spatial features (shape of the lips) and temporal changes (motion of the articulators) within a unified operation. A 3D kernel of size $k_t \times k_h \times k_w$ sweeps through the input volume, aggregating information across time, height, and width. However, this elegance comes at a cubic computational cost. The number of floating-point operations (FLOPs) in a 3D convolution scales with the temporal depth of the kernel and the input volume. On mobile devices, where memory bandwidth is a scarce resource, the massive data fetch requirements of 3D kernels lead to significant latency and power drain.1
+Furthermore, hardware support for 3D convolutions on edge accelerators is inconsistent. Most mobile NPUs and the Android Neural Networks API (NNAPI) are heavily optimized for 2D convolutions, which are ubiquitous in image classification tasks. When a 3D operator is encountered, the inference runtime often lacks a specialized kernel, forcing a fallback to the general-purpose CPU. This fallback not only destroys real-time performance but also prevents the system from utilizing the dedicated AI silicon present in modern smartphones (e.g., the Qualcomm Hexagon DSP or Apple Neural Engine).2 Consequently, the first step in modernizing MouthMap is to factorize or replace the 3D-CNN front-end.
+2.2 Pseudo-3D and (2+1)D Factorization
+To mitigate the cost of full 3D convolutions while retaining the ability to capture short-term motion, researchers have developed factorization techniques. A (2+1)D convolution decomposes a $k_t \times k_h \times k_w$ 3D kernel into two sequential operations: a 2D spatial convolution of size $1 \times k_h \times k_w$ and a 1D temporal convolution of size $k_t \times 1 \times 1$. This factorization significantly reduces the number of parameters and FLOPs, as the nonlinearity inserted between the spatial and temporal layers enables the network to represent complex functions with a more compact parameter set. Empirical evidence suggests that (2+1)D architectures often outperform full 3D-CNNs on video classification benchmarks like Kinetics-400 due to easier optimization, while being significantly faster to execute.4
+For a portfolio project, implementing a (2+1)D ResNet variant demonstrates a nuanced understanding of efficient neural network design. However, an even more aggressive optimization strategy involves leveraging heavily optimized 2D lightweight backbones applied frame-by-frame, a technique that aligns perfectly with the hardware capabilities of mobile accelerators.
+2.3 Lightweight 2D Backbones: MobileNet, ShuffleNet, and GhostNet
+The industry standard for efficient edge vision lies in specialized 2D architectures designed to minimize parameter count and MAC (Memory Access Cost). By reshaping the video input tensor $(B, C, T, H, W)$ to $(B \times T, C, H, W)$, we can process each frame independently using a 2D backbone to extract a feature vector, which is then reshaped back to $(B, T, F)$ for temporal processing.
+MobileNetV2 and Inverted Residuals:
+MobileNetV2 introduces the inverted residual block with linear bottlenecks. Unlike traditional residual blocks that compress representations in the intermediate layers, MobileNetV2 expands the channel dimension using a $1 \times 1$ convolution, performs a lightweight $3 \times 3$ depthwise convolution (where each input channel is convolved with its own single kernel), and then projects back to a lower dimension. This "wide-narrow-wide" structure allows the network to maintain a rich manifold of features while keeping the input and output footprints small, reducing memory traffic. For lip reading, a MobileNetV2 backbone pretrained on ImageNet can serve as a potent feature extractor, capturing the subtle texture and shape of the lips.5
+ShuffleNetV2 and Channel Shuffling:
+ShuffleNetV2 challenges the efficacy of depthwise separable convolutions by noting that $1 \times 1$ pointwise convolutions often become the new bottleneck. To address this, it utilizes group convolutions, where the input channels are divided into partitions processed separately. While efficient, group convolutions block information flow between groups. ShuffleNet solves this with a "Channel Shuffle" operation, which permutes the output channels to enable cross-group information exchange. This architecture is explicitly designed to optimize execution speed on ARM-based mobile CPUs, making it a superior candidate for the MouthMap project if the target deployment platform relies heavily on CPU inference.7 Comparative studies in video classification have shown ShuffleNetV2 to achieve higher accuracy-to-latency ratios than MobileNetV2 in certain regimes, particularly when computational budgets are extremely tight.6
+GhostNet:
+GhostNet is another contender that operates on the premise that feature maps in deep CNNs often contain redundant information (similar features). Instead of generating all feature maps via expensive convolutions, GhostNet generates a few intrinsic feature maps and then applies cheap linear operations (like shifts or simple filters) to produce "ghost" features. This drastically reduces the FLOPs required to generate a given number of output channels. Integrating GhostNet as the visual front-end for MouthMap would demonstrate engagement with cutting-edge efficiency research.11
+2.4 The Transformer Revolution: MobileViT
+While CNNs have dominated mobile vision, Vision Transformers (ViTs) have recently shown that self-attention mechanisms can capture global context more effectively. However, standard ViTs are heavy and hard to optimize for edge devices. MobileViT is a hybrid architecture that combines the strengths of CNNs (inductive bias for locality, efficiency) and Transformers (global processing).
+A MobileViT block replaces local processing in convolutions with global processing using transformers. It views the image as a sequence of patches but leverages a "Transformer-as-Convolution" approach to learn global representations. On benchmarks like ImageNet-1k, MobileViT has outperformed both MobileNetV3 and other lightweight ViTs for a similar parameter budget.12 For lip reading, the global receptive field of the MobileViT block could be instrumental in capturing the broader facial context (jaw movement, cheek muscle actuation) that accompanies lip motion, potentially offering higher accuracy than pure CNN baselines. Including MobileViT in the MouthMap portfolio signals a forward-looking approach, although one must be cautious about the operator support for Transformer layers on specific edge runtimes.14
+2.5 Temporal Modeling: Transitioning from Bi-LSTM to TCN and Conformers
+The back-end of the MouthMap architecture is responsible for integrating the frame-level features into a sequence that represents words or sentences. The current Bi-LSTM is a robust choice but suffers from sequential dependency: the computation for step $t$ cannot proceed until step $t-1$ is complete. This sequentiality prevents parallelization across the time dimension, leaving GPU resources underutilized during inference.
+Temporal Convolutional Networks (TCNs):
+TCNs offer a compelling alternative by using 1D convolutions across the time dimension. To capture long-range dependencies without an explosion in parameters, TCNs employ dilated convolutions, where the kernel skips input steps (dilation factor $d$). By stacking layers with exponentially increasing dilation factors ($1, 2, 4, 8, \dots$), the receptive field of the network grows exponentially with depth. Crucially, TCNs calculate the output for all time steps simultaneously (in parallel), significantly speeding up inference on parallel hardware like GPUs. Multi-Scale TCNs (MS-TCN), which combine branches with different kernel sizes, have proven particularly effective for lip reading, outperforming Bi-LSTMs in both accuracy and convergence speed.1
+Conformers:
+The Conformer architecture, popularized in automatic speech recognition, fuses Convolutional Neural Networks and Transformers. It posits that convolutions are good for learning local patterns (like the transition from a closed to an open mouth), while self-attention is superior for global sequence modeling. A Conformer block typically consists of a feed-forward module, a multi-head self-attention module, a convolution module, and another feed-forward module. While computationally heavier than TCNs, "Lite" Conformer variants can offer state-of-the-art accuracy for VSR tasks. Replacing the Bi-LSTM with a Conformer encoder would align the MouthMap project with the current state-of-the-art in audio-visual speech processing.16
+3. Model Compression and Knowledge Distillation
+Simply changing the architecture is often insufficient to meet the strict binary size and latency requirements of production apps. Advanced model compression techniques must be applied.
+3.1 Knowledge Distillation (KD)
+Knowledge Distillation is the process of training a small "Student" model to mimic the behavior of a large "Teacher" model. For MouthMap, the current ~88% accuracy 3D-CNN+Bi-LSTM model can serve as the Teacher, while a new MobileNetV2+TCN model acts as the Student.
+Response-Based Distillation:
+In this standard setup, the Student is trained to minimize two losses: the standard CTC loss against the ground truth text, and a distillation loss (usually KL Divergence) between the Student's output logits and the Teacher's output logits. The Teacher's logits contain "dark knowledge"—information about the similarities between classes (e.g., that the viseme for 'p' is very similar to 'b' but very different from 'o'). Learning this soft probability distribution helps the Student generalize better than learning from hard labels alone.17
+Cross-Modal Distillation:
+A more powerful technique for VSR is Cross-Modal Distillation. Here, the Teacher is not a visual model, but a pre-trained, high-performance Audio Speech Recognition (ASR) model. Since audio provides a much stronger signal for speech than video (which suffers from homophones), the ASR model learns highly discriminative feature representations. By forcing the visual Student to mimic the internal feature representations of the audio Teacher (e.g., minimizing the distance between their intermediate feature vectors), the visual model learns to "hallucinate" audio-like features from visual input. This technique has been shown to drastically improve lip reading performance, pushing the boundaries of what is possible with visual-only data.19 Implementing this would be a standout feature of the portfolio, demonstrating the ability to leverage multi-modal learning.
+3.2 Quantization: PTQ vs. QAT
+Quantization reduces the precision of the model's weights and activations from 32-bit floating point (FP32) to 8-bit integers (INT8). This reduces the model size by 4x and accelerates inference on hardware that supports integer arithmetic (like DSPs and modern CPUs).
+Post-Training Quantization (PTQ):
+PTQ is applied after the model is trained. It analyzes the distribution of weights and activations using a calibration dataset to determine the optimal scaling factors for quantization. While simple, PTQ can lead to significant accuracy degradation in temporal models like LSTMs or TCNs, where quantization errors can accumulate over time steps.22
+Quantization-Aware Training (QAT):
+For production-critical applications, QAT is the preferred approach. QAT inserts "fake" quantization nodes into the computation graph during the training (or fine-tuning) process. These nodes simulate the rounding and clamping effects of INT8 quantization during the forward pass, allowing the network to adjust its weights during backpropagation to compensate for the information loss. PyTorch provides a robust QAT workflow (torch.quantization.prepare_qat), which allows the MouthMap model to recover almost all the accuracy lost in PTQ while enjoying the benefits of INT8 inference.24
+4. The Edge Inference Engine Landscape
+Choosing the right inference engine is as critical as the model architecture itself. The engine determines which hardware accelerators can be accessed and which operators are supported.
+4.1 TensorFlow Lite (TFLite): The Standard Choice?
+TensorFlow Lite is the default inference engine for Android. It offers a mature converter, a wide range of pre-optimized kernels, and tight integration with Android Studio. It supports the GPU delegate (using OpenGL ES or OpenCL) and the NNAPI delegate for NPU acceleration.
+However, TFLite has historically struggled with 3D operators. The Conv3D operation, essential for the current MouthMap architecture, often lacks a GPU implementation in TFLite, forcing the runtime to fall back to the CPU. This fallback creates a massive performance cliff, rendering real-time 3D-CNN inference unfeasible on many devices.2 While custom operators can be written, this adds significant engineering overhead. If the architecture is refactored to a 2D backbone (e.g., MobileNetV2), TFLite becomes a very strong candidate, offering excellent performance and tooling.
+4.2 ONNX Runtime: The High-Performance Alternative
+ONNX Runtime (ORT) has emerged as a powerful alternative, particularly for complex or non-standard architectures. Built by Microsoft, ORT is designed to execute models in the ONNX (Open Neural Network Exchange) format, which acts as a lingua franca between frameworks (PyTorch, TensorFlow, etc.).
+Why ORT for MouthMap:
+1. Broad Operator Support: ORT generally has broader support for advanced operators, including Conv3D and various RNN variants, across its execution providers. It reduces the "operator not supported" friction often encountered with TFLite.27
+2. Cross-Platform Consistency: A single .onnx artifact can be deployed to Android (via the ORT Android Archive), iOS (via the ORT C/C++ or Objective-C API), and the web (via ONNX Runtime Web). This simplifies model versioning and lifecycle management.29
+3. Graph Optimizations: ORT performs sophisticated graph optimizations at runtime, such as constant folding, layer fusion (e.g., Conv+BatchNormalization+ReLU), and memory planning. These optimizations can lead to significant speedups without any changes to the model weights.30
+4. Execution Providers (EPs): ORT uses an extensible architecture of EPs. On Android, it can use the NNAPI EP to offload supported subgraphs (like the 2D backbone) to the NPU, while efficiently running unsupported ops on the CPU. It also supports the Qualcomm QNN EP for Snapdragon devices, unlocking extreme performance efficiency.31
+Conclusion: For the current 3D-CNN architecture, ONNX Runtime is the recommended deployment engine due to its superior operator support. For a refactored 2D architecture, both TFLite and ORT are viable, but ORT offers a more unified cross-platform story for a portfolio project.
+5. Server-Side Serving and Orchestration
+While edge inference is the goal for latency, a robust portfolio project should also demonstrate the ability to serve the model in the cloud or on an edge gateway (like an NVIDIA Jetson) for scenarios requiring higher accuracy or model aggregation.
+5.1 NVIDIA Triton Inference Server
+NVIDIA Triton Inference Server is the industry-standard solution for serving deep learning models at scale. It supports multiple frameworks (TensorFlow, PyTorch, ONNX, TensorRT) simultaneously and provides advanced features like dynamic batching and concurrent model execution.
+Decoupled Models for Streaming:
+Lip reading is inherently a streaming task. A user speaks continuously, and the system should provide transcriptions in real-time, not wait for the end of the sentence. Standard HTTP/REST protocols are request-response based and ill-suited for this. Triton supports Decoupled Models, where the backend can send multiple responses for a single request. This allows the implementation of a pipeline where the client streams audio/video chunks, and the Triton backend processes them (perhaps using a stateful decoder) and yields partial transcripts as they become available. This architecture mimics the behavior of commercial ASR systems like Google Speech-to-Text.33
+Dynamic Batching:
+When multiple users connect to the service, processing requests one by one is inefficient. Triton's dynamic batching automatically groups inference requests arriving within a configurable time window (e.g., 5ms) into a single batch. This allows the GPU to perform matrix multiplications on larger tensors, significantly improving throughput (inferences per second) without a major penalty in latency.35
+5.2 Communication Protocols: gRPC vs. WebSockets
+The choice of communication protocol is vital for streaming performance.
+gRPC with Bidirectional Streaming:
+gRPC, based on HTTP/2 and Protocol Buffers, supports bidirectional streaming natively. A client can open a persistent connection and stream video frames to the server, while the server streams back text tokens on the same connection. This reduces the overhead of establishing TCP connections (handshakes) for every request. gRPC is strongly typed and generates client code automatically for various languages (Python, Java, Swift), making it robust for production systems.37
+WebSockets:
+For browser-based clients (e.g., a React app), WebSockets are the standard for real-time bidirectional communication. While Triton has a beta WebSocket extension, a common pattern is to place a lightweight proxy (like Envoy or a Python FastAPI service) in front of Triton. The proxy accepts WebSockets from the browser and translates them into gRPC calls to Triton. This allows the backend to remain pure gRPC while supporting web clients.39
+6. MLOps: The Backbone of Production
+A production ML project is defined not just by the model code, but by the infrastructure that supports it. Implementing a proper MLOps pipeline is crucial for a portfolio project.
+6.1 Data Version Control (DVC)
+Video datasets like GRID are large and binary; storing them in Git is an anti-pattern that bloats the repository. Data Version Control (DVC) allows you to version control large files by storing lightweight metadata files (.dvc) in Git, while the actual data resides in remote storage (S3, Google Cloud Storage, Azure Blob). DVC enables reproducibility: checking out a specific Git commit also allows you to pull the exact version of the dataset used to train the model at that commit.41
+Implementation:
+The pipeline should utilize dvc add data/grid_corpus to track the data. A DVC pipeline (dvc.yaml) can define the stages of the workflow: data extraction -> preprocessing -> training -> evaluation. This ensures that if any stage's dependency changes, only the necessary downstream steps are re-executed.
+6.2 CI/CD for Machine Learning
+Continuous Integration/Continuous Deployment (CI/CD) ensures that changes to the code do not break the system. A GitHub Actions workflow should be implemented to:
+1. Lint and Test: Check code quality (flake8, black) and run unit tests on the model architecture (e.g., verifying input/output shapes).
+2. Sanity Check: Run a fast training loop on a tiny subset of data to ensure convergence behavior hasn't broken.
+3. Build and Push: Build the Docker image for the inference server (containing the Triton backend and dependencies) and push it to a container registry (Docker Hub, ECR).
+4. Model Registry: If the training run is successful and meets accuracy thresholds, tag the model and push it to a Model Registry (like MLflow or DVC Studio).43
+7. Advanced Decoding Strategies
+The output of the CTC layer is a matrix of probabilities over the character set for each time step. Converting this to a human-readable string requires decoding.
+Greedy Decoding vs. Beam Search:
+Greedy decoding (taking the most probable character at each step) is fast but inaccurate, as it ignores linguistic context. Beam Search maintains a set of the k most probable character sequences (beams). It explores the search space more thoroughly, allowing it to recover from local errors.
+Language Model Integration:
+In production, visual ambiguity is unavoidable. A Language Model (LM) acts as a prior, scoring candidate sequences based on their probability in the English language. Integrating an N-gram LM (using KenLM) into the Beam Search decoder significantly reduces Word Error Rate (WER) by penalizing non-words and grammatically incorrect sequences. This is a critical component of high-accuracy systems.
+Performance Considerations:
+Python implementations of Beam Search are too slow for real-time edge inference. The project must utilize efficient C++ implementations with Python bindings, such as ctcdecode (from Parlance) or pyctcdecode (optimized for Transformers). These libraries can process beams in milliseconds, ensuring the decoding step does not become the bottleneck.16
+8. Implementation Roadmap and Best Practices
+To successfully execute this project for a portfolio, the following roadmap is recommended:
+Phase 1: Architecture Refactoring & Optimization
+* Replace the 3D-CNN/Bi-LSTM with a ShuffleNetV2 + MS-TCN architecture.
+* Implement Cross-Modal Knowledge Distillation using a pre-trained ASR teacher.
+* Apply Quantization Aware Training (QAT) using PyTorch's quantization.prepare_qat to produce an INT8 model.
+Phase 2: Inference Engine Integration
+* Export the QAT model to ONNX.
+* Develop a Python script to run inference using ONNX Runtime with the NNAPI execution provider (simulating Android deployment).
+* Benchmark the latency and accuracy against the original PyTorch model.
+Phase 3: Production Pipeline Construction
+* Set up a Triton Inference Server with a Python backend in Decoupled Mode to handle streaming.
+* Implement a gRPC client that captures webcam video, buffers frames, and streams them to Triton.
+* Integrate pyctcdecode with a KenLM language model within the Triton backend.
+Phase 4: Frontend & Visualization
+* Build a Streamlit dashboard that acts as the user interface, visualizing the video feed, the real-time transcription, and Saliency Maps.
+* Saliency maps (using Grad-CAM) show which parts of the lip region the model is focusing on, adding a layer of interpretability that is highly valued in ML portfolios.47
+9. Future Horizons: Self-Supervised Learning and Neuromorphic Computing
+Looking beyond the immediate horizon, the field of lip reading is evolving towards Self-Supervised Learning (SSL). Models like AV-HuBERT leverage vast amounts of unlabeled audio-visual data to learn robust representations, eliminating the dependency on labeled corpora like GRID. Furthermore, for ultra-low-power edge applications, Neuromorphic Computing using event cameras (which record changes in brightness rather than frames) offers a paradigm shift. Event-based lip reading models can operate at microsecond resolution with negligible power consumption, representing the ultimate goal for always-on edge VSR systems.49 Acknowledging these trends in the project documentation demonstrates a vision that extends beyond current implementation details.
+10. Conclusion
+Deploying the MouthMap lip reading system to the edge is a multifaceted engineering challenge that demands expertise across model design, optimization theory, and distributed systems. By moving from heavy 3D architectures to efficient 2D backbones like ShuffleNetV2 or MobileViT, utilizing advanced quantization and distillation techniques, and leveraging the interoperability of ONNX Runtime, the project can achieve the delicate balance between accuracy and latency required for production. The integration of a robust MLOps pipeline with Triton and DVC further elevates the work from a mere academic exercise to a professional-grade software product. This rigorous approach not only ensures the technical success of the deployment but also creates a compelling, multi-dimensional narrative for a Machine Learning portfolio.
+11. Detailed Deployment Reference Table
+Component
+	Recommendation
+	Alternative
+	Rationale
+	Backbone
+	ShuffleNetV2 (0.5x)
+	MobileNetV2 / MobileViT
+	ShuffleNetV2 maximizes speed on mobile CPUs/NPUs via channel shuffling. MobileViT offers higher accuracy but higher latency.
+	Temporal
+	MS-TCN
+	Lite Conformer
+	TCN allows parallel computation of the sequence, essential for GPU utilization.
+	Quantization
+	QAT (INT8)
+	PTQ (Dynamic)
+	QAT recovers accuracy lost in temporal sequence modeling better than PTQ.
+	Runtime
+	ONNX Runtime
+	TFLite
+	ONNX Runtime has broader support for 3D/RNN ops and consistent cross-platform APIs.
+	Protocol
+	gRPC Streaming
+	WebSockets
+	gRPC provides strictly typed contracts and lower overhead for streaming binary video data.
+	Decoding
+	Beam Search + KenLM
+	Greedy Decoding
+	Beam search with a language model is necessary to correct visual ambiguity (homophones).
+	Orchestration
+	Triton (Decoupled)
+	FastAPI / Flask
+	Triton manages batching and GPU resources much more efficiently than a simple web server.
+	This comprehensive blueprint provides the necessary depth and structure to build, deploy, and showcase the MouthMap project as a cutting-edge example of modern Machine Learning Engineering.
+References: 1
+Works cited
+1. Lip Reading by Alternating between Spatiotemporal and Spatial Convolutions - PMC - NIH, accessed January 16, 2026, https://pmc.ncbi.nlm.nih.gov/articles/PMC8321361/
+2. [TFLite/LiteRT] Conv3D does not support acceleration · Issue #2573 · google-ai-edge/LiteRT, accessed January 16, 2026, https://github.com/google-ai-edge/LiteRT/issues/2573
+3. Can't run very a basic model with GPU delegate. Problem with my conversion?, accessed January 16, 2026, https://ai-benchmark.net/index.php?threads/cant-run-very-a-basic-model-with-gpu-delegate-problem-with-my-conversion.132/
+4. HHTseng/video-classification - CNN+RNN on UCF101 - GitHub, accessed January 16, 2026, https://github.com/HHTseng/video-classification
+5. Deploying A Deep Learning Model on Mobile Using TensorFlow and React, accessed January 16, 2026, https://towardsdatascience.com/deploying-a-deep-learning-model-on-mobile-using-tensorflow-and-react-4b594fe04ab/
+6. Research on lip recognition algorithm based on MobileNet + attention-GRU - AIMS Press, accessed January 16, 2026, http://www.aimspress.com/aimspress-data/mbe/2022/12/PDF/mbe-19-12-631.pdf
+7. onnx/models: A collection of pre-trained, state-of-the-art models in the ONNX format - GitHub, accessed January 16, 2026, https://github.com/onnx/models
+8. Resource Efficient 3D Convolutional Neural Networks - mediaTUM, accessed January 16, 2026, https://mediatum.ub.tum.de/doc/1483392/637166.pdf
+9. Chinese Lip-Reading Research Based on ShuffleNet and CBAM - MDPI, accessed January 16, 2026, https://www.mdpi.com/2076-3417/13/2/1106
+10. Research on lip recognition algorithm based on MobileNet + attention-GRU - AIMS Press, accessed January 16, 2026, https://www.aimspress.com/article/doi/10.3934/mbe.2022631?viewType=HTML
+11. Spatiotemporal Feature Enhancement for Lip-Reading: A Survey - MDPI, accessed January 16, 2026, https://www.mdpi.com/2076-3417/15/8/4142
+12. MobileViT: Light-weight, General-purpose, and Mobile-friendly Vision Transformer, accessed January 16, 2026, https://machinelearning.apple.com/research/vision-transformer
+13. MOBILEVIT: LIGHT-WEIGHT, GENERAL-PURPOSE, AND MOBILE-FRIENDLY VISION TRANSFORMER - OpenReview, accessed January 16, 2026, https://openreview.net/pdf?id=qUcX0Zn5ROG
+14. mobilevit · GitHub Topics, accessed January 16, 2026, https://github.com/topics/mobilevit
+15. [PDF] Towards Practical Lipreading with Distilled and Efficient Models - Semantic Scholar, accessed January 16, 2026, https://www.semanticscholar.org/paper/3c72ce6b8b575d78d189dfc9ce89002d7a4db209
+16. pyctcdecode — A new beam search decoder for CTC speech recognition - Kensho Blog, accessed January 16, 2026, https://blog.kensho.com/pyctcdecode-a-new-beam-search-decoder-for-ctc-speech-recognition-2be3863afa96
+17. Knowledge Distillation: Teacher-Student Loss Explained - Data Annotation Company, accessed January 16, 2026, https://labelyourdata.com/articles/machine-learning/knowledge-distillation
+18. A Friendly Guide to Knowledge Distillation (with PyTorch code you can paste today), accessed January 16, 2026, https://mohamed-stifi.medium.com/a-friendly-guide-to-knowledge-distillation-with-pytorch-code-you-can-paste-today-5a764762e7c7
+19. [1911.11502] Hearing Lips: Improving Lip Reading by Distilling Speech Recognizers - arXiv, accessed January 16, 2026, https://arxiv.org/abs/1911.11502
+20. arXiv:2207.05692v1 [cs.MM] 5 Jun 2022, accessed January 16, 2026, https://arxiv.org/pdf/2207.05692
+21. GitHub - lliai/Awesome-Vision-Knowledge-Distillation, accessed January 16, 2026, https://github.com/lliai/Awesome-Vision-Knowledge-Distillation
+22. Quantization-aware Training (QAT) with PyTorch - OpenVINO™ documentation, accessed January 16, 2026, https://docs.openvino.ai/2024/openvino-workflow/model-optimization-guide/compressing-models-during-training/quantization-aware-training-pytorch.html
+23. A Brief Quantization Tutorial on Pytorch with Code | by Prajot Kuvalekar | Medium, accessed January 16, 2026, https://medium.com/@Prajot_Saiprasad/a-brief-quantization-tutorial-on-pytorch-with-code-a8f448c840cd
+24. What is Quantization Aware Training? - IBM, accessed January 16, 2026, https://www.ibm.com/think/topics/quantization-aware-training
+25. Quantization-Aware Training for Large Language Models with PyTorch, accessed January 16, 2026, https://pytorch.org/blog/quantization-aware-training/
+26. TFLite GPU Delegate error on Android - General Discussion - Google AI Developers Forum, accessed January 16, 2026, https://discuss.ai.google.dev/t/tflite-gpu-delegate-error-on-android/23694
+27. Deploy on mobile - ONNX Runtime, accessed January 16, 2026, https://onnxruntime.ai/docs/tutorials/mobile/
+28. Edge AI: TensorFlow Lite vs. ONNX Runtime vs. PyTorch Mobile - DZone, accessed January 16, 2026, https://dzone.com/articles/edge-ai-tensorflow-lite-vs-onnx-runtime-vs-pytorch
+29. onnxruntime - ONNX Runtime, accessed January 16, 2026, https://onnxruntime.ai/docs/
+30. Tune Mobile Performance (ORT <1.10 only) | onnxruntime, accessed January 16, 2026, https://onnxruntime.ai/docs/performance/mobile-performance-tuning.html
+31. Android - NNAPI | onnxruntime, accessed January 16, 2026, https://onnxruntime.ai/docs/execution-providers/NNAPI-ExecutionProvider.html
+32. Unlocking the power of Qualcomm QNN Execution Provider GPU backend for ONNX Runtime, accessed January 16, 2026, https://www.qualcomm.com/developer/blog/2025/05/unlocking-power-of-qualcomm-qnn-execution-provider-gpu-backend-onnx-runtime
+33. Decoupled Model Examples — NVIDIA Triton Inference Server, accessed January 16, 2026, https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/python_backend/examples/decoupled/README.html
+34. Decoupled Backends and Models — NVIDIA Triton Inference Server, accessed January 16, 2026, https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/decoupled_models.html
+35. Simplifying AI Inference with NVIDIA Triton Inference Server from NVIDIA NGC, accessed January 16, 2026, https://developer.nvidia.com/blog/simplifying-ai-inference-with-nvidia-triton-inference-server-from-nvidia-ngc/
+36. Because it's a waste for anything other than proof of concept/handful of users. ... | Hacker News, accessed January 16, 2026, https://news.ycombinator.com/item?id=35200266
+37. Core concepts, architecture and lifecycle - gRPC, accessed January 16, 2026, https://grpc.io/docs/what-is-grpc/core-concepts/
+38. Getting Started with gRPC-Python - Streaming - Google Codelabs, accessed January 16, 2026, https://codelabs.developers.google.com/grpc/getting-started-grpc-python-streaming
+39. How can i send a video mediastream from React js to Python using Websocket?, accessed January 16, 2026, https://stackoverflow.com/questions/78010611/how-can-i-send-a-video-mediastream-from-react-js-to-python-using-websocket
+40. Streaming AI Responses with WebSockets, SSE, and gRPC: Which One Wins? - Medium, accessed January 16, 2026, https://medium.com/@pranavprakash4777/streaming-ai-responses-with-websockets-sse-and-grpc-which-one-wins-a481cab403d3
+41. P1 — MLOps: DVC — Data Version Control | by Vardhan Devireddy - Medium, accessed January 16, 2026, https://medium.com/@vardhanreddy1228/p1-mlops-dvc-data-version-control-39e7adf45863
+42. Building Data Pipeline Using DVC - Master MLOps - YouTube, accessed January 16, 2026, https://www.youtube.com/watch?v=WDUSeIgAvSw
+43. MLOps Definition and Benefits | Databricks, accessed January 16, 2026, https://www.databricks.com/glossary/mlops
+44. Simple example of FastAPI + gRPC AsyncIO + Triton - GitHub, accessed January 16, 2026, https://github.com/Curt-Park/mnist-fastapi-aio-triton
+45. Beam Search Decoding in CTC-trained Neural Networks | by Harald Scheidl - Medium, accessed January 16, 2026, https://harald-scheidl.medium.com/beam-search-decoding-in-ctc-trained-neural-networks-5a889a3d85a7
+46. parlance/ctcdecode: PyTorch CTC Decoder bindings - GitHub, accessed January 16, 2026, https://github.com/parlance/ctcdecode
+47. What Do Deep Saliency Models Learn about Visual Attention? - NeurIPS, accessed January 16, 2026, https://proceedings.neurips.cc/paper_files/paper/2023/file/1e680f115a22d60cbc228a0c6dae5936-Paper-Conference.pdf
+48. skaty5678/lipread_tensorflow - GitHub, accessed January 16, 2026, https://github.com/skaty5678/lipread_tensorflow
+49. End-to-End Neuromorphic Lip-Reading - CVF Open Access, accessed January 16, 2026, https://openaccess.thecvf.com/content/CVPR2023W/EventVision/papers/Bulzomi_End-to-End_Neuromorphic_Lip-Reading_CVPRW_2023_paper.pdf
+50. Event-Based Binary Neural Networks for Efficient and Accurate Lip Reading - GitHub, accessed January 16, 2026, https://raw.githubusercontent.com/mlresearch/v278/main/assets/zhang25c/zhang25c.pdf

@@ -1,0 +1,46 @@
+# MouthMap Docker Ignore
+# =======================
+# Files to exclude from Docker build context
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.eggs/
+
+# Data (large files)
+data/
+*.npz
+*.npy
+
+# Model artifacts (except production model)
+models/onnx/lipnet_baseline_int8_dynamic.onnx
+models/onnx/lipnet_baseline_int8_static.onnx
+models/onnx/lipnet_baseline_fp16.onnx
+Current--Approach/
+pretrained_weights/
+
+# Development
+.git/
+.gitignore
+.github/
+*.md
+!README.md
+notebooks/
+tests/
+scripts/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swa
+
+# OS
+.DS_Store
+Thumbs.db

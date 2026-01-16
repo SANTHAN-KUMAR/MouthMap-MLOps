@@ -1,0 +1,8 @@
+# Large data and models
+data/
+models/
+pretrained_weights/
+Current--Approach/
+
+# GitHub configuration
+.github/
