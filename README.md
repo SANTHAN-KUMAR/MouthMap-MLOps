@@ -1,6 +1,5 @@
 # MouthMap: Deep Learning Lip Reading System
 
-![Project Status](https://img.shields.io/badge/Status-Research_Prototype-yellow)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange)
 
