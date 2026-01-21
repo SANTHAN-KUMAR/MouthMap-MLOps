@@ -61,8 +61,5 @@ Currently, training is driven via the notebook in `Current--Approach/MouthMap.ip
 ## 📄 Documentation
 For a deep dive into the code quality, state-of-the-art comparisons, and implementation details, please read the **[PROJECT_REPORT.md](PROJECT_REPORT.md)**.
 
-## 📜 License
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 👥 Authors
 - **Santhan Kumar** - *Lead Developer*
