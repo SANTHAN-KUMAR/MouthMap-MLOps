@@ -36,8 +36,6 @@ The system processes video sequences (75 frames) through the following pipeline:
 3.  **Alignment-Free Training**:
     - **CTC Loss** (Connectionist Temporal Classification) allows training without frame-to-phoneme alignment labels.
 
-## 🚀 Getting Started
-
 ### Prerequisites
 
 ```bash
