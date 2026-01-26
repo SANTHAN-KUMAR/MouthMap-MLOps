@@ -56,8 +56,5 @@ Currently, training is driven via the notebook in `Current--Approach/MouthMap.ip
 - **Metric**: CTC Loss.
 - **Status**: The model converges from initial loss of ~100 to ~50 within 10 epochs. Pre-trained checkpoints (epoch 40+) demonstrate recognizable sentence predictions.
 
-## 📄 Documentation
-For a deep dive into the code quality, state-of-the-art comparisons, and implementation details, please read the **[PROJECT_REPORT.md](PROJECT_REPORT.md)**.
-
 ## 👥 Authors
 - **Santhan Kumar** - *Lead Developer*
