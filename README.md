@@ -139,6 +139,16 @@ Every GRID sentence follows this exact pattern:
 
 **Alternative:** Random split across all speakers (higher accuracy, but doesn't test generalization).
 
+### 3.4 Required Assets & Downloads
+
+To begin development, the following datasets and models are required:
+
+| Asset | Description | Download Link |
+|-------|-------------|---------------|
+| **GRID Corpus** | Full audiovisual dataset (34 speakers) | [University of Sheffield](http://spandh.dcs.shef.ac.uk/gridcorpus/) or [Zenodo Mirror](https://zenodo.org/record/3625687) |
+| **AV-HuBERT** | Pre-trained model weights (Base) | [Facebook Research GitHub](https://github.com/facebookresearch/av_hubert) |
+| **MediaPipe** | Face Mesh model (via Python package) | Installed via `pip install mediapipe` |
+
 ---
 
 ## 4. Design Decisions
